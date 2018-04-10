@@ -59,6 +59,7 @@ struct sSV_ASDU {
 
     uint64_t refrTm;
     uint8_t smpMod;
+    uint16_t smpRate;
 
     uint8_t* smpCntBuf;
 
@@ -221,6 +222,34 @@ encodeInt32FixedSize(int32_t value, uint8_t* buffer, int bufPos)
 }
 
 static int
+encodeInt64FixedSize(int64_t value, uint8_t* buffer, int bufPos)
+{
+    uint8_t* valueArray = (uint8_t*) &value;
+
+#if (ORDER_LITTLE_ENDIAN == 1)
+    buffer[bufPos++] = valueArray[7];
+    buffer[bufPos++] = valueArray[6];
+    buffer[bufPos++] = valueArray[5];
+    buffer[bufPos++] = valueArray[4];
+    buffer[bufPos++] = valueArray[3];
+    buffer[bufPos++] = valueArray[2];
+    buffer[bufPos++] = valueArray[1];
+    buffer[bufPos++] = valueArray[0];
+#else
+    buffer[bufPos++] = valueArray[0];
+    buffer[bufPos++] = valueArray[1];
+    buffer[bufPos++] = valueArray[2];
+    buffer[bufPos++] = valueArray[3];
+    buffer[bufPos++] = valueArray[4];
+    buffer[bufPos++] = valueArray[5];
+    buffer[bufPos++] = valueArray[6];
+    buffer[bufPos++] = valueArray[7];
+#endif
+
+    return bufPos;
+}
+
+static int
 encodeUtcTime(uint64_t timeval, uint8_t* buffer, int bufPos)
 {
     uint32_t timeval32 = (timeval / 1000LL);
@@ -257,13 +286,13 @@ encodeUtcTime(uint64_t timeval, uint8_t* buffer, int bufPos)
 SampledValuesPublisher
 SampledValuesPublisher_create(CommParameters* parameters, const char* interfaceId)
 {
-	SampledValuesPublisher self = (SampledValuesPublisher) GLOBAL_CALLOC(1, sizeof(struct sSampledValuesPublisher));
+    SampledValuesPublisher self = (SampledValuesPublisher) GLOBAL_CALLOC(1, sizeof(struct sSampledValuesPublisher));
 
-	self->asduLIst = NULL;
+    self->asduLIst = NULL;
 
-	preparePacketBuffer(self, parameters, interfaceId);
+    preparePacketBuffer(self, parameters, interfaceId);
 
-	return self;
+    return self;
 }
 
 SV_ASDU
@@ -369,7 +398,10 @@ SV_ASDU_encodeToBuffer(SV_ASDU self, uint8_t* buffer, int bufPos)
     buffer[bufPos++] = self->smpSynch;
 
     /* SmpRate */
-    //TODO implement me
+    if (self->hasSmpRate) {
+        bufPos = BerEncoder_encodeTL(0x86, 2, buffer, bufPos);
+        bufPos = encodeUInt16FixedSize(self->smpRate, buffer, bufPos);
+    }
 
     /* Sample */
     bufPos = BerEncoder_encodeTL(0x87, self->dataSize, buffer, bufPos);
@@ -377,15 +409,11 @@ SV_ASDU_encodeToBuffer(SV_ASDU self, uint8_t* buffer, int bufPos)
     self->_dataBuffer = buffer + bufPos;
 
     bufPos += self->dataSize; /* data has to inserted by user before sending message */
-
+    
     /* SmpMod */
     if (self->hasSmpMod) {
-        bufPos = BerEncoder_encodeTL(0x84, 4, buffer, bufPos);
-        buffer[bufPos++] = 0;
-        buffer[bufPos++] = 0;
-        buffer[bufPos++] = 0;
-        buffer[bufPos++] = self->smpMod;
-
+        bufPos = BerEncoder_encodeTL(0x88, 4, buffer, bufPos);
+        bufPos = encodeUInt16FixedSize(self->smpMod, buffer, bufPos);
     }
 
     return bufPos;
@@ -465,7 +493,7 @@ SampledValuesPublisher_publish(SampledValuesPublisher self)
 void
 SampledValuesPublisher_destroy(SampledValuesPublisher self)
 {
-	GLOBAL_FREEMEM(self->buffer);
+    GLOBAL_FREEMEM(self->buffer);
 }
 
 
@@ -509,6 +537,22 @@ SV_ASDU_setINT32(SV_ASDU self, int index, int32_t value)
 }
 
 int
+SV_ASDU_addINT64(SV_ASDU self)
+{
+    int index = self->dataSize;
+
+    self->dataSize += 8;
+
+    return index;
+}
+
+void
+SV_ASDU_setINT64(SV_ASDU self, int index, int64_t value)
+{
+    encodeInt64FixedSize(value, self->_dataBuffer, index);
+}
+
+int
 SV_ASDU_addFLOAT(SV_ASDU self)
 {
     int index = self->dataSize;
@@ -522,7 +566,6 @@ void
 SV_ASDU_setFLOAT(SV_ASDU self, int index, float value)
 {
     uint8_t* buf = (uint8_t*) &value;
-
 
 #if (ORDER_LITTLE_ENDIAN == 1)
     BerEncoder_revertByteOrder(buf, 4);
@@ -550,11 +593,15 @@ void
 SV_ASDU_setFLOAT64(SV_ASDU self, int index, double value)
 {
     uint8_t* buf = (uint8_t*) &value;
+
 #if (ORDER_LITTLE_ENDIAN == 1)
     BerEncoder_revertByteOrder(buf, 8);
 #endif
+
     int i;
+
     uint8_t* buffer = self->_dataBuffer + index;
+
     for (i = 0; i < 8; i++) {
         buffer[i] = buf[i];
     }
@@ -596,3 +643,9 @@ SV_ASDU_setSmpMod(SV_ASDU self, uint8_t smpMod)
     self->smpMod = smpMod;
 }
 
+void
+SV_ASDU_setSmpRate(SV_ASDU self, uint16_t smpRate)
+{
+    self->hasSmpRate = true;
+    self->smpRate = smpRate;
+}

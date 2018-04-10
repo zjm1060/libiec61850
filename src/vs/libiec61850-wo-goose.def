@@ -571,3 +571,5 @@ EXPORTS
     IedModel_getDeviceByInst
     MmsConnection_writeNamedVariableList
     IedConnection_writeDataSetValues
+    MmsVariableSpecification_isValueOfType
+    IedServer_udpateDbposValue

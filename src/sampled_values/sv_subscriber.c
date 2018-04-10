@@ -50,7 +50,13 @@ struct sSVReceiver {
 
     uint8_t* buffer;
     EthernetSocket ethSocket;
+
     LinkedList subscriberList;
+
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+    Semaphore subscriberListLock;
+#endif
+
 };
 
 struct sSVSubscriber {
@@ -88,6 +94,10 @@ SVReceiver_create(void)
         self->buffer = (uint8_t*) GLOBAL_MALLOC(ETH_BUFFER_LENGTH);
 
         self->checkDestAddr = false;
+
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+        self->subscriberListLock = Semaphore_create(1);
+#endif
     }
 
     return self;
@@ -111,13 +121,29 @@ SVReceiver_disableDestAddrCheck(SVReceiver self)
 void
 SVReceiver_addSubscriber(SVReceiver self, SVSubscriber subscriber)
 {
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+    Semaphore_wait(self->subscriberListLock);
+#endif
+
     LinkedList_add(self->subscriberList, (void*) subscriber);
+
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+    Semaphore_post(self->subscriberListLock);
+#endif
 }
 
 void
 SVReceiver_removeSubscriber(SVReceiver self, SVSubscriber subscriber)
 {
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+    Semaphore_wait(self->subscriberListLock);
+#endif
+
     LinkedList_remove(self->subscriberList, (void*) subscriber);
+
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+    Semaphore_post(self->subscriberListLock);
+#endif
 }
 
 static void
@@ -173,6 +199,10 @@ SVReceiver_destroy(SVReceiver self)
 {
     LinkedList_destroyDeep(self->subscriberList,
             (LinkedListValueDeleteFunction) SVSubscriber_destroy);
+
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+        Semaphore_destroy(self->subscriberListLock);
+#endif
 
     GLOBAL_FREEMEM(self->buffer);
     GLOBAL_FREEMEM(self);
@@ -398,6 +428,11 @@ parseSVMessage(SVReceiver self, int numbytes)
 
 
     /* check if there is a matching subscriber */
+
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+    Semaphore_wait(self->subscriberListLock);
+#endif
+
     LinkedList element = LinkedList_getNext(self->subscriberList);
 
     SVSubscriber subscriber;
@@ -426,6 +461,10 @@ parseSVMessage(SVReceiver self, int numbytes)
 
         element = LinkedList_getNext(element);
     }
+
+#if (CONFIG_MMS_THREADLESS_STACK == 0)
+    Semaphore_post(self->subscriberListLock);
+#endif
 
 
     if (subscriberFound)
@@ -598,6 +637,20 @@ SVClientASDU_getINT32(SVClientASDU self, int index)
     return retVal;
 }
 
+int64_t
+SVClientASDU_getINT64(SVClientASDU self, int index)
+{
+    int64_t retVal = *((int64_t*) (self->dataBuffer + index));
+
+#if (ORDER_LITTLE_ENDIAN == 1)
+    uint8_t* buf = (uint8_t*) (&retVal);
+
+    BerEncoder_revertByteOrder(buf, 8);
+#endif
+
+    return retVal;
+}
+
 uint8_t
 SVClientASDU_getINT8U(SVClientASDU self, int index)
 {
@@ -634,6 +687,19 @@ SVClientASDU_getINT32U(SVClientASDU self, int index)
     return retVal;
 }
 
+uint64_t
+SVClientASDU_getINT64U(SVClientASDU self, int index)
+{
+    uint64_t retVal = *((uint64_t*) (self->dataBuffer + index));
+
+#if (ORDER_LITTLE_ENDIAN == 1)
+    uint8_t* buf = (uint8_t*) (&retVal);
+
+    BerEncoder_revertByteOrder(buf, 8);
+#endif
+
+    return retVal;
+}
 
 float
 SVClientASDU_getFLOAT32(SVClientASDU self, int index)
